@@ -13,7 +13,7 @@ function optional(name, fallback = "") {
 
 export const ENV = {
   openrouterApiKey: required("OPENROUTER_API_KEY"),
-  openrouterModel: optional("OPENROUTER_MODEL", "google/gemma-2-9b-it:free"),
+  openrouterModel: optional("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
   openrouterApiUrl: optional("OPENROUTER_API_URL", "https://openrouter.ai/api/v1"),
   cloudflareImageEndpoint: required("CLOUDFLARE_IMAGE_ENDPOINT"),
   googleClientId: required("GOOGLE_CLIENT_ID"),
