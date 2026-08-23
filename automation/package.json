@@ -1,0 +1,14 @@
+{
+  "name": "storyforge-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone daily story generation + publishing automation for StoryForge. No database, no auth, no Express server - designed to run inside a GitHub Actions job.",
+  "scripts": {
+    "start": "node src/run.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.685.0",
+    "pdfkit": "^0.19.1"
+  }
+}
