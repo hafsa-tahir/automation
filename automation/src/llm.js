@@ -55,40 +55,105 @@ function stripCodeFences(text) {
   return fenced ? fenced[1] : trimmed;
 }
 
-export async function invokeJson({ system, user, maxTokens = 3000 }) {
-  const call = async (extraInstruction = "") => {
-    const response = await fetch(`${ENV.openrouterApiUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${ENV.openrouterApiKey}`,
-      },
-      body: JSON.stringify({
-        model: ENV.openrouterModel,
-        max_tokens: maxTokens,
-        messages: [
-          { role: "system", content: `${system} Return JSON only, with no markdown code fences, no preamble, and no explanation.${extraInstruction}` },
-          { role: "user", content: user },
-        ],
-      }),
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const OPENROUTER_FALLBACK_MODEL = "openrouter/free";
+
+async function callOpenAiCompatible(baseUrl, apiKey, model, system, user, extraInstruction, maxTokens) {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: `${system} Return JSON only, with no markdown code fences, no preamble, and no explanation.${extraInstruction}` },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    const error = new Error(`Request to ${baseUrl} failed (${response.status}): ${body.slice(0, 300)}`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error(`${baseUrl} returned an empty response.`);
+  }
+  return stripCodeFences(content);
+}
+
+async function attemptWithRetry(label, call, extraInstruction) {
+  const maxRetries = 3;
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      return await call(extraInstruction);
+    } catch (error) {
+      lastError = error;
+      if (error.status === 429 && attempt < maxRetries - 1) {
+        const waitMs = 4000 * (attempt + 1);
+        console.warn(`[llm] ${label} rate-limited, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${maxRetries})...`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
+function buildProviderChain(system, user, maxTokens) {
+  const chain = [];
+  const add = (name, baseUrl, apiKey, model) => {
+    chain.push({
+      name,
+      call: extraInstruction => callOpenAiCompatible(baseUrl, apiKey, model, system, user, extraInstruction, maxTokens),
     });
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`OpenRouter request failed (${response.status}): ${body.slice(0, 300)}`);
+  };
+
+  add(`OpenRouter (${ENV.openrouterModel})`, ENV.openrouterApiUrl, ENV.openrouterApiKey, ENV.openrouterModel);
+  if (ENV.openrouterModel !== OPENROUTER_FALLBACK_MODEL) {
+    add(`OpenRouter (${OPENROUTER_FALLBACK_MODEL})`, ENV.openrouterApiUrl, ENV.openrouterApiKey, OPENROUTER_FALLBACK_MODEL);
+  }
+
+  if (ENV.groqApiKey) {
+    add(`Groq (${ENV.groqModel})`, "https://api.groq.com/openai/v1", ENV.groqApiKey, ENV.groqModel);
+  }
+
+  if (ENV.geminiApiKey) {
+    add(`Gemini (${ENV.geminiModel})`, "https://generativelanguage.googleapis.com/v1beta/openai", ENV.geminiApiKey, ENV.geminiModel);
+  }
+
+  return chain;
+}
+
+export async function invokeJson({ system, user, maxTokens = 3000 }) {
+  const runChain = async (extraInstruction) => {
+    const chain = buildProviderChain(system, user, maxTokens);
+    let lastError;
+    for (const provider of chain) {
+      try {
+        return await attemptWithRetry(provider.name, provider.call, extraInstruction);
+      } catch (error) {
+        lastError = error;
+        console.warn(`[llm] ${provider.name} failed entirely (${error.message}), trying next provider if any...`);
+      }
     }
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) {
-      throw new Error("OpenRouter returned an empty response.");
-    }
-    return stripCodeFences(content);
+    throw lastError || new Error("No text-generation provider is configured.");
   };
 
   try {
-    const content = await call();
+    const content = await runChain("");
     return parseStructuredJson(content);
   } catch (firstError) {
-    const content = await call(" This is critical: your entire reply must be a single valid JSON object and nothing else.");
+    const content = await runChain(" This is critical: your entire reply must be a single valid JSON object and nothing else.");
     return parseStructuredJson(content);
   }
 }
