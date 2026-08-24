@@ -161,20 +161,19 @@ export async function invokeJson({ system, user, maxTokens = 3000 }) {
     let lastError;
     for (const provider of chain) {
       try {
-        return await attemptWithRetry(provider.name, provider.call, extraInstruction);
+        const content = await attemptWithRetry(provider.name, provider.call, extraInstruction);
+        return parseStructuredJson(content);
       } catch (error) {
         lastError = error;
-        console.warn(`[llm] ${provider.name} failed entirely (${error.message}), trying next provider if any...`);
+        console.warn(`[llm] ${provider.name} did not produce usable JSON (${error.message}), trying next provider if any...`);
       }
     }
     throw lastError || new Error("No text-generation provider is configured.");
   };
 
   try {
-    const content = await runChain("");
-    return parseStructuredJson(content);
+    return await runChain("");
   } catch (firstError) {
-    const content = await runChain(" This is critical: your entire reply must be a single valid JSON object and nothing else.");
-    return parseStructuredJson(content);
+    return await runChain(" This is critical: your entire reply must be a single valid JSON object and nothing else.");
   }
 }
