@@ -9,7 +9,7 @@ async function createProduct({ name, description, priceCents, tags }) {
       "content-type": "application/json",
       authorization: `Bearer ${ENV.gumroadAccessToken}`,
     },
-    body: JSON.stringify({ name, description, price: priceCents, tags: tags.join(",") }),
+    body: JSON.stringify({ name, description, price: priceCents, tags }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
