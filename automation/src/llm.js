@@ -35,17 +35,38 @@ function escapeRawControlCharactersInStrings(value) {
   return output;
 }
 
+function extractJsonObject(content) {
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return content.slice(start, end + 1);
+}
+
 export function parseStructuredJson(content) {
   try {
     return JSON.parse(content);
   } catch (firstError) {
     const repaired = escapeRawControlCharactersInStrings(content);
-    if (repaired === content) throw firstError;
-    try {
-      return JSON.parse(repaired);
-    } catch {
-      throw new Error("The writing service returned malformed JSON that could not be repaired.");
+    if (repaired !== content) {
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        // fall through to the extraction attempt below
+      }
     }
+    const extracted = extractJsonObject(content);
+    if (extracted) {
+      try {
+        return JSON.parse(extracted);
+      } catch {
+        try {
+          return JSON.parse(escapeRawControlCharactersInStrings(extracted));
+        } catch {
+          // fall through to final error
+        }
+      }
+    }
+    throw new Error("The writing service returned malformed JSON that could not be repaired.");
   }
 }
 
